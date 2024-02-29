@@ -2,7 +2,7 @@
 # tasks file for roles/mysqldb
 - pause:
     prompt: "- Hello I'm Mohmed3del DevOps Engineer;) \n- This will Setup MySQL Database and Tables in Container \n- Do you want to continue [ Enter / CTRL + C ]?"
-    
+
 - name: Installing Mysql  and dependencies
   package:
     name: "{{item}}"
@@ -40,10 +40,10 @@
     container_host: "{{ containerinfo.container.NetworkSettings.IPAddress }}"
 
 
-- name: Wait for MariaDB to be ready
+- name: Wait for MySQLDB to be ready
   wait_for:
     port: 3306
-    timeout: 30
+    timeout: 60
 
 - name: Create database
   mysql_db:
