@@ -1,0 +1,10 @@
+---
+- name: Setup MySQL Database and Tables in Container
+  hosts: DB
+  roles:
+  - mysqldb
+
+
+
+
+  

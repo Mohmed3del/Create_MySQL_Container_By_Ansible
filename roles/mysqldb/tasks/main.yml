@@ -1,0 +1,142 @@
+---
+# tasks file for roles/mysqldb
+- pause:
+    prompt: "- Hello I'm Mohmed3del DevOps Engineer;) \n- This will Setup MySQL Database and Tables in Container \n- Do you want to continue [ Enter / CTRL + C ]?"
+    
+- name: Installing Mysql  and dependencies
+  package:
+    name: "{{item}}"
+    state: present
+    update_cache: yes
+  loop:
+    - python3-pip
+  register: mysql_Install
+
+- name: Install Python packages
+  pip:
+    name: "{{ item }}"
+  loop:
+    - pymysql
+    - mysql-connector-python
+    - cryptography
+
+- name: Ensure MariaDB container is running
+  docker_container:
+    name: "{{ docker_container_name }}"
+    image: "mysql:latest"
+    env:
+      MYSQL_ROOT_PASSWORD: "{{ db_password }}"
+    ports:
+      - "3306:3306"
+    state: started
+
+- name: Container details
+  docker_container_info:
+    name: "{{ docker_container_name }}"
+  register: containerinfo
+
+- name: Set Container Host
+  set_fact:
+    container_host: "{{ containerinfo.container.NetworkSettings.IPAddress }}"
+
+
+- name: Wait for MariaDB to be ready
+  wait_for:
+    port: 3306
+    timeout: 30
+
+- name: Create database
+  mysql_db:
+    login_host: "{{ container_host }}"  # or the specific IP if necessary
+    login_port: 3306
+    login_user: "root"  # or any specified user
+    login_password: "{{ db_password }}"
+    name: "{{ db_name }}"
+    state: present
+  register: DataBase
+  
+
+- name: Create inv_master table
+  when: DataBase.changed
+  mysql_query:
+    login_host: "{{ container_host }}"
+    login_port: 3306    
+    login_user: "{{ db_user }}"
+    login_password: "{{ db_password }}"
+    login_db: "{{ db_name }}"  # Adjusted from db to login_db
+    query: |
+      CREATE TABLE IF NOT EXISTS inv_master (
+      id INT PRIMARY KEY,
+      date DATE,
+      total DECIMAL(10, 2)
+      );
+
+
+- name: Create inv_details table
+  when: DataBase.changed
+  mysql_query:
+    login_host: "{{ container_host }}"
+    login_port: 3306
+    login_user: "{{ db_user }}"
+    login_password: "{{ db_password }}"
+    login_db: "{{ db_name }}"  # Adjusted from db to login_db
+    query: |
+      CREATE TABLE IF NOT EXISTS inv_details (
+      item_id INT PRIMARY KEY,
+      item_name VARCHAR(255),
+      quantity INT,
+      invid INT,
+      FOREIGN KEY (invid) REFERENCES inv_master(id)
+      );
+  
+
+- name: Generate inv_master data file from template
+  template:
+    src: "{{ item }}"
+    dest: "/tmp/{{ item | regex_replace('.j2$', '') }}"
+  loop:
+    - inv_master.txt.j2
+    - inv_details.txt.j2
+
+- name: Read inventory master file
+  slurp:
+    src: "/tmp/inv_master.txt"
+  register: inv_master_content
+
+- name: Decode inventory master content
+  set_fact:
+    inv_master_lines: "{{ (inv_master_content['content'] | b64decode).splitlines() }}"
+
+- name: Read inventory details file
+  slurp:
+    src: "/tmp/inv_details.txt"
+  register: inv_details_content
+
+- name: Decode inventory details content
+  set_fact:
+    inv_details_lines: "{{ (inv_details_content['content'] | b64decode).splitlines() }}"
+
+- name: Insert data into inv_master from file
+  mysql_query:
+    login_host: "{{ container_host }}"
+    login_port: 3306
+    login_user: "{{ db_user }}"
+    login_password: "{{ db_password }}"
+    login_db: "{{ db_name }}"
+    query: "INSERT IGNORE INTO inv_master (id, date, total) VALUES (%s, %s, %s);"
+    positional_args: "{{ item.split(':') }}"
+  loop: "{{ inv_master_lines }}"
+  delegate_to: DB
+
+- name: Insert data into inv_details from file
+  mysql_query:
+    login_host: "{{ container_host }}"  
+    login_port: 3306
+    login_user: "{{ db_user }}"
+    login_password: "{{ db_password }}"
+    login_db: "{{ db_name }}"
+    query: "INSERT IGNORE INTO inv_details (item_id, item_name, quantity, invid) VALUES (%s, %s, %s, %s);"
+    positional_args: "{{ item.split(':') }}"
+  loop: "{{ inv_details_lines }}"
+  delegate_to: DB
+ 
